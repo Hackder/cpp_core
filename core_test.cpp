@@ -118,9 +118,9 @@ TEST(Core, ArrayProgrammingVec3) {
 
     Vector3 vec4 = vec3 * 2.0f;
 
-    EXPECT_EQ(vec4[0], 10.0f);
-    EXPECT_EQ(vec4[1], 14.0f);
-    EXPECT_EQ(vec4[2], 18.0f);
+    EXPECT_EQ(vec4.x, 10.0f);
+    EXPECT_EQ(vec4.y, 14.0f);
+    EXPECT_EQ(vec4.z, 18.0f);
 }
 
 TEST(Core, ArrayProgrammingVec4) {
@@ -133,10 +133,10 @@ TEST(Core, ArrayProgrammingVec4) {
 
     Vector4 vec4 = vec3 * 2.0f;
 
-    EXPECT_EQ(vec4[0], 10.0f);
-    EXPECT_EQ(vec4[1], 14.0f);
-    EXPECT_EQ(vec4[2], 18.0f);
-    EXPECT_EQ(vec4[3], 20.0f);
+    EXPECT_EQ(vec4.x, 10.0f);
+    EXPECT_EQ(vec4.y, 14.0f);
+    EXPECT_EQ(vec4.z, 18.0f);
+    EXPECT_EQ(vec4.w, 20.0f);
 }
 
 TEST(Core, RingBuffer) {
