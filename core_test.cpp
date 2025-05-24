@@ -174,6 +174,41 @@ TEST(Core, RingBuffer) {
     EXPECT_EQ(buffer.size, 3);
 }
 
+TEST(Core, RingBufferPushFront) {
+    Slice<u8> buff = slice_make<u8>(1024, c_allocator());
+    defer(core_free(c_allocator(), buff.data));
+    Arena arena = arena_make(buff);
+    Allocator alloc = arena_allocator(&arena);
+
+    RingBuffer<int> buffer = ring_buffer_make<int>(4, alloc);
+
+    // Test basic push_front operations
+    ring_buffer_push_front(&buffer, 3);
+    ring_buffer_push_front(&buffer, 2);
+    ring_buffer_push_front(&buffer, 1);
+
+    EXPECT_EQ(buffer[0], 1);
+    EXPECT_EQ(buffer[1], 2);
+    EXPECT_EQ(buffer[2], 3);
+    EXPECT_EQ(buffer.size, 3);
+
+    // Test push_front with buffer wrap-around
+    ring_buffer_push_front(&buffer, 0);
+    ring_buffer_push_front(&buffer, -1); // Should cause growth
+
+    EXPECT_EQ(buffer[0], -1);
+    EXPECT_EQ(buffer[1], 0);
+    EXPECT_EQ(buffer[2], 1);
+    EXPECT_EQ(buffer[3], 2);
+    EXPECT_EQ(buffer[4], 3);
+    EXPECT_EQ(buffer.size, 5);
+
+    // Verify elements are in correct order after popping
+    EXPECT_EQ(ring_buffer_pop_front(&buffer), -1);
+    EXPECT_EQ(ring_buffer_pop_end(&buffer), 3);
+    EXPECT_EQ(buffer.size, 3);
+}
+
 TEST(Core, BitSet) {
     Slice<u8> buff = slice_make<u8>(1024, c_allocator());
     defer(core_free(c_allocator(), buff.data));

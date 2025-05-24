@@ -142,8 +142,8 @@ struct Allocator {
 };
 
 template <typename T>
-inline T* core_alloc(Allocator allocator, isize count = 1,
-                     isize alignment = alignof(T)) {
+__attribute__((malloc)) __attribute__((returns_nonnull)) inline T*
+core_alloc(Allocator allocator, isize count = 1, isize alignment = alignof(T)) {
     core_assert_msg((alignment & (alignment - 1)) == 0,
                     "Alignment must be a power of 2");
     return (T*)allocator.alloc(allocator.data, AllocationMode::Alloc,
@@ -348,6 +348,7 @@ inline void arena_init(Arena* arena, Slice<u8> data) {
     core_assert(data.data != nullptr);
     core_assert(data.size > 0);
 
+    slice_clear_to_zero(data);
     arena->data = data;
     arena->offset = 0;
 }
@@ -358,8 +359,8 @@ inline Arena arena_make(Slice<u8> data) {
     return arena;
 }
 
-inline u8* arena_alloc(Arena* arena, isize size,
-                       isize alignment = DEFAULT_ALIGNMENT) {
+__attribute__((malloc)) __attribute__((returns_nonnull)) inline u8*
+arena_alloc(Arena* arena, isize size, isize alignment = DEFAULT_ALIGNMENT) {
     core_assert(arena != nullptr);
     core_assert(arena->data.data != nullptr);
     core_assert(arena->offset >= 0);
@@ -471,7 +472,10 @@ inline MemoryBlock* memory_block_create(isize size, Allocator alloc) {
     return block;
 }
 
-inline void dynamic_arena_init(DynamicArena* arena, isize block_size_min,
+const isize DEFAULT_BLOCK_SIZE_MIN = 4 * 1024 * 1024; // 4 MB
+
+inline void dynamic_arena_init(DynamicArena* arena,
+                               isize block_size_min = DEFAULT_BLOCK_SIZE_MIN,
                                Allocator alloc = c_allocator()) {
     arena->block_size_min = block_size_min;
 
@@ -480,8 +484,9 @@ inline void dynamic_arena_init(DynamicArena* arena, isize block_size_min,
     arena->current = block;
 }
 
-inline DynamicArena dynamic_arena_make(isize block_size_min = 4 * 1024 * 1024,
-                                       Allocator alloc = c_allocator()) {
+inline DynamicArena
+dynamic_arena_make(isize block_size_min = DEFAULT_BLOCK_SIZE_MIN,
+                   Allocator alloc = c_allocator()) {
     DynamicArena arena;
     arena.alloc = alloc;
     dynamic_arena_init(&arena, block_size_min);
@@ -616,6 +621,13 @@ inline isize dynamic_arena_get_size(DynamicArena* arena) {
     }
 
     return size;
+}
+
+inline Allocator
+create_temporary_storage(isize default_block_size = DEFAULT_BLOCK_SIZE_MIN) {
+    DynamicArena dynamic_arena =
+        dynamic_arena_make(default_block_size, c_allocator());
+    return dynamic_arena_allocator(&dynamic_arena);
 }
 
 /// ------------------
@@ -1183,6 +1195,50 @@ inline void ring_buffer_push_end(RingBuffer<T>* ring_buffer, T value) {
 
     ring_buffer->data[ring_buffer->tail] = value;
     ring_buffer->tail += 1;
+}
+
+template <typename T>
+inline void ring_buffer_push_front(RingBuffer<T>* ring_buffer, T value) {
+    core_assert(ring_buffer->tail <= ring_buffer->capacity);
+    core_assert(ring_buffer->tail >= 0);
+    core_assert(ring_buffer->head < ring_buffer->capacity);
+    core_assert(ring_buffer->head >= 0);
+    core_assert(ring_buffer->capacity > 0);
+    core_assert(ring_buffer->data);
+
+    // Grow
+    if (ring_buffer->size == ring_buffer->capacity) {
+        isize new_capacity = ring_buffer->capacity * 2;
+        T* new_data = core_alloc<T>(ring_buffer->alloc, new_capacity);
+
+        isize head = ring_buffer->head;
+        isize tail = ring_buffer->tail;
+
+        if (head < tail) {
+            memcpy(new_data + 1, ring_buffer->data + head,
+                   sizeof(T) * (tail - head));
+        } else {
+            isize first_size = ring_buffer->capacity - head;
+            memcpy(new_data + 1, ring_buffer->data + head,
+                   sizeof(T) * first_size);
+            memcpy(new_data + first_size + 1, ring_buffer->data,
+                   sizeof(T) * tail);
+        }
+
+        ring_buffer->data = new_data;
+        ring_buffer->capacity = new_capacity;
+        ring_buffer->head = 1;
+        ring_buffer->tail = ring_buffer->size + 1;
+    }
+
+    if (ring_buffer->head == 0) {
+        ring_buffer->head = ring_buffer->capacity - 1;
+    } else {
+        ring_buffer->head -= 1;
+    }
+
+    ring_buffer->size += 1;
+    ring_buffer->data[ring_buffer->head] = value;
 }
 
 template <typename T>
