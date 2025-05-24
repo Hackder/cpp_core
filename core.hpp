@@ -623,13 +623,6 @@ inline isize dynamic_arena_get_size(DynamicArena* arena) {
     return size;
 }
 
-inline Allocator
-create_temporary_storage(isize default_block_size = DEFAULT_BLOCK_SIZE_MIN) {
-    DynamicArena dynamic_arena =
-        dynamic_arena_make(default_block_size, c_allocator());
-    return dynamic_arena_allocator(&dynamic_arena);
-}
-
 /// ------------------
 /// Strings
 /// ------------------
