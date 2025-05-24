@@ -99,6 +99,28 @@ inline void core_assert_handler(char const* prefix, char const* condition,
 }
 
 /// ------------------
+/// Result
+/// ------------------
+
+template <typename T, typename E> struct Result {
+    union {
+        T value;
+        E error;
+    };
+    bool is_ok;
+
+    Result(T value, bool is_ok) : value(value), is_ok(is_ok) {
+    }
+
+    Result(E error, bool is_ok) : error(error), is_ok(is_ok) {
+    }
+};
+
+#define result_ok(result) {result, true}
+
+#define result_err(result) {result, false}
+
+/// ------------------
 /// Memory allocation
 /// ------------------
 
@@ -769,12 +791,25 @@ inline String string_from_slice(Slice<u8> slice) {
     return String{(const char*)slice.data, slice.size};
 }
 
-inline const char* string_to_cstr(const String str, Allocator alloc) {
+inline const char* string_to_cstr_alloc(const String str, Allocator alloc) {
     char* data = core_alloc<char>(alloc, str.size + 1);
     memcpy(data, str.data, str.size);
     data[str.size] = '\0';
 
     return data;
+}
+
+inline const char* string_to_cstr(const String str, char* buffer,
+                                  isize buffer_size) {
+    core_assert_msg(buffer != nullptr, "Buffer is null");
+    core_assert_msg(buffer_size > 0, "Buffer size is 0");
+    core_assert_msg(str.data != nullptr, "String data is null");
+    core_assert_msg(str.size >= 0, "String size is negative");
+    core_assert_msg(buffer_size > str.size, "%ld > %ld", buffer_size, str.size);
+    memcpy(buffer, str.data, str.size);
+    buffer[str.size] = '\0';
+
+    return buffer;
 }
 
 inline String string_substr(String str, isize start, isize count) {
@@ -1765,28 +1800,73 @@ inline void hash_set_remove(HashSet<T>* hash_set, T value) {
 /// Files
 /// ----------------
 
-inline Slice<u8> file_read_full(const char* path, Allocator alloc) {
-    FILE* file = fopen(path, "rb");
+const isize MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024l; // 1 GB
+
+enum class FileReadError {
+    FileNotFound,
+    PermissionsDenied,
+    SystemError,
+    ReadError,
+    InvalidFile,
+    SizeTooLarge
+};
+
+inline Result<Slice<u8>, FileReadError>
+file_read_full(const String path, Allocator alloc,
+               isize max_allowed_size = MAX_FILE_SIZE) {
+
+    char path_buffer[PATH_MAX];
+    string_to_cstr(path, path_buffer, sizeof(path_buffer));
+
+    FILE* file = fopen(path_buffer, "rb");
     if (!file) {
-        return {};
+        switch (errno) {
+        case ENOENT:
+            return result_err(FileReadError::FileNotFound);
+        case EACCES:
+        case EPERM:
+            return result_err(FileReadError::PermissionsDenied);
+        default:
+            return result_err(FileReadError::SystemError);
+        }
     }
     defer(fclose(file));
 
-    fseek(file, 0, SEEK_END);
-    long size = ftell(file);
-    fseek(file, 0, SEEK_SET);
+    if (fseek(file, 0, SEEK_END) != 0) {
+        return result_err(FileReadError::InvalidFile);
+    }
 
-    Slice<u8> data = slice_make<u8>(size, alloc);
+    long size = ftell(file);
+    if (size < 0) {
+        return result_err(FileReadError::InvalidFile);
+    }
+
+    if (size > max_allowed_size) {
+        return result_err(FileReadError::SizeTooLarge);
+    }
+
+    if (fseek(file, 0, SEEK_SET) != 0) {
+        return result_err(FileReadError::InvalidFile);
+    }
+
+    Slice<u8> data;
+    data = slice_make<u8>(size, alloc);
+
     isize bytes_read = 0;
     while (bytes_read < size) {
         isize read = fread(data.data + bytes_read, 1, size - bytes_read, file);
         if (read <= 0) {
+            if (ferror(file)) {
+                return result_err(FileReadError::ReadError);
+            }
             break;
         }
         bytes_read += read;
     }
 
-    core_assert_msg(bytes_read == size, "Failed to read file");
+    if (bytes_read != size) {
+        return result_err(FileReadError::ReadError);
+    }
 
-    return data;
+    return result_ok(data);
 }

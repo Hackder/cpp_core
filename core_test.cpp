@@ -348,7 +348,7 @@ TEST(Core, StringAllocation) {
     EXPECT_EQ(str.size, 11);
     EXPECT_TRUE(str == "Test String");
 
-    const char* cstr = string_to_cstr(str, alloc);
+    const char* cstr = string_to_cstr_alloc(str, alloc);
     EXPECT_STREQ(cstr, "Test String");
 }
 
@@ -419,4 +419,20 @@ TEST(Core, RuneIteration) {
     EXPECT_EQ(rune_iter_next(&it).codepoint, 0x754C); // 界
 
     EXPECT_TRUE(rune_iter_done(&it));
+}
+
+TEST(Core, ReadFileFull) {
+    Slice<u8> buff = slice_make<u8>(1024, c_allocator());
+    defer(core_free(c_allocator(), buff.data));
+    Arena arena = arena_make(buff);
+    Allocator alloc = arena_allocator(&arena);
+
+    Result<Slice<u8>, FileReadError> file_data =
+        file_read_full(string_from_cstr("../testfile.txt"), alloc);
+
+    EXPECT_TRUE(file_data.is_ok);
+    core_assert(file_data.is_ok);
+    String data = string_from_slice(file_data.value);
+    EXPECT_EQ(file_data.value.size, 14);
+    EXPECT_EQ(data, "Hello, World!\n");
 }
