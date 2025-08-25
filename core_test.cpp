@@ -139,6 +139,20 @@ TEST(Core, ArrayProgrammingVec4) {
     EXPECT_EQ(vec4.w, 20.0f);
 }
 
+TEST(Core, ModByPowerOfTwo) {
+    EXPECT_EQ(mod_by_power_of_two(5, 4), 1);
+    EXPECT_EQ(mod_by_power_of_two(15, 8), 7);
+    EXPECT_EQ(mod_by_power_of_two(32, 16), 0);
+    EXPECT_EQ(mod_by_power_of_two(0, 2), 0);
+    EXPECT_EQ(mod_by_power_of_two(7, 1), 0);
+
+    // Test with negative numbers
+    EXPECT_EQ(mod_by_power_of_two(-1, 4), 3);
+    EXPECT_EQ(mod_by_power_of_two(-5, 8), 3);
+    EXPECT_EQ(mod_by_power_of_two(-16, 16), 0);
+    EXPECT_EQ(mod_by_power_of_two(-7, 2), 1);
+}
+
 TEST(Core, RingBuffer) {
     Slice<u8> buff = slice_make<u8>(1024, c_allocator());
     defer(core_free(c_allocator(), buff.data));
@@ -154,10 +168,10 @@ TEST(Core, RingBuffer) {
     EXPECT_EQ(buffer[0], 1);
     EXPECT_EQ(buffer[1], 2);
     EXPECT_EQ(buffer[2], 3);
-    EXPECT_EQ(buffer.size, 3);
+    EXPECT_EQ(ring_buffer_size(&buffer), 3);
 
     EXPECT_EQ(ring_buffer_pop_front(&buffer), 1);
-    EXPECT_EQ(buffer.size, 2);
+    EXPECT_EQ(ring_buffer_size(&buffer), 2);
 
     ring_buffer_push_end(&buffer, 4);
     ring_buffer_push_end(&buffer, 5); // Should cause growth
@@ -171,7 +185,7 @@ TEST(Core, RingBuffer) {
     EXPECT_FALSE(ring_buffer_contains(&buffer, 1));
 
     EXPECT_EQ(ring_buffer_pop_end(&buffer), 5);
-    EXPECT_EQ(buffer.size, 3);
+    EXPECT_EQ(ring_buffer_size(&buffer), 3);
 }
 
 TEST(Core, RingBufferPushFront) {
@@ -183,6 +197,7 @@ TEST(Core, RingBufferPushFront) {
     RingBuffer<int> buffer = ring_buffer_make<int>(4, alloc);
 
     // Test basic push_front operations
+    ring_buffer_push_front(&buffer, 4);
     ring_buffer_push_front(&buffer, 3);
     ring_buffer_push_front(&buffer, 2);
     ring_buffer_push_front(&buffer, 1);
@@ -190,23 +205,22 @@ TEST(Core, RingBufferPushFront) {
     EXPECT_EQ(buffer[0], 1);
     EXPECT_EQ(buffer[1], 2);
     EXPECT_EQ(buffer[2], 3);
-    EXPECT_EQ(buffer.size, 3);
+    EXPECT_EQ(buffer[3], 4);
+    EXPECT_EQ(ring_buffer_size(&buffer), 4);
 
-    // Test push_front with buffer wrap-around
-    ring_buffer_push_front(&buffer, 0);
-    ring_buffer_push_front(&buffer, -1); // Should cause growth
+    ring_buffer_push_front(&buffer, 0); // Should cause growth
 
-    EXPECT_EQ(buffer[0], -1);
-    EXPECT_EQ(buffer[1], 0);
-    EXPECT_EQ(buffer[2], 1);
-    EXPECT_EQ(buffer[3], 2);
-    EXPECT_EQ(buffer[4], 3);
-    EXPECT_EQ(buffer.size, 5);
+    EXPECT_EQ(buffer[0], 0);
+    EXPECT_EQ(buffer[1], 1);
+    EXPECT_EQ(buffer[2], 2);
+    EXPECT_EQ(buffer[3], 3);
+    EXPECT_EQ(buffer[4], 4);
+    EXPECT_EQ(ring_buffer_size(&buffer), 5);
 
     // Verify elements are in correct order after popping
-    EXPECT_EQ(ring_buffer_pop_front(&buffer), -1);
-    EXPECT_EQ(ring_buffer_pop_end(&buffer), 3);
-    EXPECT_EQ(buffer.size, 3);
+    EXPECT_EQ(ring_buffer_pop_front(&buffer), 0);
+    EXPECT_EQ(ring_buffer_pop_end(&buffer), 4);
+    EXPECT_EQ(ring_buffer_size(&buffer), 3);
 }
 
 TEST(Core, BitSet) {

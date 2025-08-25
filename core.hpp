@@ -1102,42 +1102,56 @@ template <typename T> inline T array_last(Array<T>* array) {
 /// Ring buffer
 /// ------------------
 
+inline isize mod_by_power_of_two(isize x, isize m) {
+    core_assert_msg((m & (m - 1)) == 0, "m must be a power of 2");
+
+    return x & (m - 1);
+}
+
 template <typename T> struct RingBuffer {
     Allocator alloc;
     T* data;
     isize capacity;
-    isize size;
-    // Head is the first element
-    isize head;
-    // Tail is one past the last element
-    isize tail;
+    // This is a position. Not an index. It can be larger than capacity.
+    // To get the index, do start_pos % capacity
+    isize start_pos;
+    // This is a position. Not an index. It can be larger than capacity.
+    // To get the index, do end_pos % capacity
+    isize end_pos;
 
     T& operator[](isize index) {
         core_assert(index >= 0);
-        core_assert(index < this->size);
+        core_assert(index < ring_buffer_size(this));
 
-        isize real_index = (head + index) % capacity;
+        isize real_index = mod_by_power_of_two((start_pos + index), capacity);
         return this->data[real_index];
     }
 
     const T& operator[](isize index) const {
         core_assert(index >= 0);
-        core_assert(index < this->size);
+        core_assert(index < ring_buffer_size(this));
 
-        isize real_index = (head + index) % capacity;
+        isize real_index = mod_by_power_of_two((start_pos + index), capacity);
         return this->data[real_index];
     }
 };
 
+template <typename T> inline isize ring_buffer_size(RingBuffer<T>* rb) {
+    return rb->end_pos - rb->start_pos;
+}
+
 template <typename T>
 inline void ring_buffer_init(RingBuffer<T>* ring_buffer, isize capacity,
                              Allocator alloc) {
+    core_assert(ring_buffer != nullptr);
+    core_assert(capacity > 0);
+    core_assert_msg((capacity & (capacity - 1)) == 0,
+                    "Capacity must be a power of 2");
     ring_buffer->alloc = alloc;
     ring_buffer->data = core_alloc<T>(alloc, capacity);
     ring_buffer->capacity = capacity;
-    ring_buffer->size = 0;
-    ring_buffer->head = 0;
-    ring_buffer->tail = 0;
+    ring_buffer->start_pos = 0;
+    ring_buffer->end_pos = 0;
 }
 
 template <typename T>
@@ -1149,132 +1163,124 @@ inline RingBuffer<T> ring_buffer_make(isize capacity, Allocator alloc) {
 
 template <typename T>
 inline void ring_buffer_push_end(RingBuffer<T>* ring_buffer, T value) {
-    core_assert(ring_buffer->tail <= ring_buffer->capacity);
-    core_assert(ring_buffer->tail >= 0);
-    core_assert(ring_buffer->head < ring_buffer->capacity);
-    core_assert(ring_buffer->head >= 0);
+    core_assert(ring_buffer->end_pos >= ring_buffer->start_pos);
     core_assert(ring_buffer->capacity > 0);
     core_assert(ring_buffer->data);
 
+    isize size = ring_buffer_size(ring_buffer);
+
     // Grow
-    if (ring_buffer->size == ring_buffer->capacity) {
+    if (size == ring_buffer->capacity) {
         isize new_capacity = ring_buffer->capacity * 2;
         T* new_data = core_alloc<T>(ring_buffer->alloc, new_capacity);
 
-        isize head = ring_buffer->head;
-        isize tail = ring_buffer->tail;
+        isize start_index =
+            mod_by_power_of_two(ring_buffer->start_pos, ring_buffer->capacity);
+        isize end_index =
+            mod_by_power_of_two(ring_buffer->end_pos, ring_buffer->capacity);
 
-        if (head < tail) {
-            memcpy(new_data, ring_buffer->data + head,
-                   sizeof(T) * (tail - head));
+        if (start_index < end_index) {
+            memcpy(new_data, ring_buffer->data + start_index, sizeof(T) * size);
         } else {
-            isize first_size = ring_buffer->capacity - head;
-            memcpy(new_data, ring_buffer->data + head, sizeof(T) * first_size);
-            memcpy(new_data + first_size, ring_buffer->data, sizeof(T) * tail);
+            isize first_size = ring_buffer->capacity - start_index;
+            memcpy(new_data, ring_buffer->data + start_index,
+                   sizeof(T) * first_size);
+            memcpy(new_data + first_size, ring_buffer->data,
+                   sizeof(T) * end_index);
         }
 
+        core_free(ring_buffer->alloc, ring_buffer->data);
         ring_buffer->data = new_data;
         ring_buffer->capacity = new_capacity;
-        ring_buffer->head = 0;
-        ring_buffer->tail = ring_buffer->size;
+        ring_buffer->start_pos = 0;
+        ring_buffer->end_pos = size;
     }
 
-    ring_buffer->size += 1;
-    if (ring_buffer->tail == ring_buffer->capacity) {
-        ring_buffer->tail = 1;
-        ring_buffer->data[0] = value;
-        return;
-    }
-
-    ring_buffer->data[ring_buffer->tail] = value;
-    ring_buffer->tail += 1;
+    isize new_index =
+        mod_by_power_of_two(ring_buffer->end_pos, ring_buffer->capacity);
+    ring_buffer->data[new_index] = value;
+    ring_buffer->end_pos += 1;
 }
 
 template <typename T>
 inline void ring_buffer_push_front(RingBuffer<T>* ring_buffer, T value) {
-    core_assert(ring_buffer->tail <= ring_buffer->capacity);
-    core_assert(ring_buffer->tail >= 0);
-    core_assert(ring_buffer->head < ring_buffer->capacity);
-    core_assert(ring_buffer->head >= 0);
+    core_assert(ring_buffer->end_pos >= ring_buffer->start_pos);
     core_assert(ring_buffer->capacity > 0);
     core_assert(ring_buffer->data);
 
+    isize size = ring_buffer_size(ring_buffer);
+
     // Grow
-    if (ring_buffer->size == ring_buffer->capacity) {
+    if (size == ring_buffer->capacity) {
         isize new_capacity = ring_buffer->capacity * 2;
         T* new_data = core_alloc<T>(ring_buffer->alloc, new_capacity);
 
-        isize head = ring_buffer->head;
-        isize tail = ring_buffer->tail;
+        isize start_index =
+            mod_by_power_of_two(ring_buffer->start_pos, ring_buffer->capacity);
+        isize end_index =
+            mod_by_power_of_two(ring_buffer->end_pos, ring_buffer->capacity);
 
-        if (head < tail) {
-            memcpy(new_data + 1, ring_buffer->data + head,
-                   sizeof(T) * (tail - head));
+        if (start_index < end_index) {
+            memcpy(new_data + 1, ring_buffer->data + start_index,
+                   sizeof(T) * size);
         } else {
-            isize first_size = ring_buffer->capacity - head;
-            memcpy(new_data + 1, ring_buffer->data + head,
+            isize first_size = ring_buffer->capacity - start_index;
+            memcpy(new_data + 1, ring_buffer->data + start_index,
                    sizeof(T) * first_size);
-            memcpy(new_data + first_size + 1, ring_buffer->data,
-                   sizeof(T) * tail);
+            memcpy(new_data + 1 + first_size, ring_buffer->data,
+                   sizeof(T) * end_index);
         }
 
+        core_free(ring_buffer->alloc, ring_buffer->data);
         ring_buffer->data = new_data;
         ring_buffer->capacity = new_capacity;
-        ring_buffer->head = 1;
-        ring_buffer->tail = ring_buffer->size + 1;
+        ring_buffer->start_pos = 1;
+        ring_buffer->end_pos = size + 1;
     }
 
-    if (ring_buffer->head == 0) {
-        ring_buffer->head = ring_buffer->capacity - 1;
-    } else {
-        ring_buffer->head -= 1;
-    }
-
-    ring_buffer->size += 1;
-    ring_buffer->data[ring_buffer->head] = value;
+    ring_buffer->start_pos -= 1;
+    isize new_index =
+        mod_by_power_of_two(ring_buffer->start_pos, ring_buffer->capacity);
+    ring_buffer->data[new_index] = value;
 }
 
 template <typename T>
 inline T ring_buffer_pop_front(RingBuffer<T>* ring_buffer) {
-    core_assert(ring_buffer->tail <= ring_buffer->capacity);
-    core_assert(ring_buffer->tail >= 0);
-    core_assert(ring_buffer->head < ring_buffer->capacity);
-    core_assert(ring_buffer->head >= 0);
+    core_assert(ring_buffer->end_pos >= ring_buffer->start_pos);
     core_assert(ring_buffer->capacity > 0);
     core_assert(ring_buffer->data);
 
-    core_assert_msg(ring_buffer->size > 0, "ring_buffer is empty");
+    core_assert_msg(ring_buffer->start_pos != ring_buffer->end_pos,
+                    "ring_buffer is empty");
 
-    T value = ring_buffer->data[ring_buffer->head];
-
-    ring_buffer->head = (ring_buffer->head + 1) % ring_buffer->capacity;
-    ring_buffer->size -= 1;
+    isize start_index =
+        mod_by_power_of_two(ring_buffer->start_pos, ring_buffer->capacity);
+    T value = ring_buffer->data[start_index];
+    ring_buffer->start_pos += 1;
 
     return value;
 }
 
 template <typename T> inline T ring_buffer_pop_end(RingBuffer<T>* ring_buffer) {
-    core_assert(ring_buffer->tail <= ring_buffer->capacity);
-    core_assert(ring_buffer->tail >= 0);
-    core_assert(ring_buffer->head < ring_buffer->capacity);
-    core_assert(ring_buffer->head >= 0);
+    core_assert(ring_buffer->end_pos >= ring_buffer->start_pos);
     core_assert(ring_buffer->capacity > 0);
     core_assert(ring_buffer->data);
 
-    core_assert_msg(ring_buffer->size > 0, "ring_buffer is empty");
+    core_assert_msg(ring_buffer->start_pos != ring_buffer->end_pos,
+                    "ring_buffer is empty");
 
-    ring_buffer->tail =
-        (ring_buffer->tail - 1 + ring_buffer->capacity) % ring_buffer->capacity;
-    T value = ring_buffer->data[ring_buffer->tail];
-
-    ring_buffer->size -= 1;
+    ring_buffer->end_pos -= 1;
+    isize end_index =
+        mod_by_power_of_two(ring_buffer->end_pos, ring_buffer->capacity);
+    T value = ring_buffer->data[end_index];
 
     return value;
 }
 
 template <typename T>
 inline bool ring_buffer_contains(RingBuffer<T>* ring_buffer, T value) {
-    for (isize i = 0; i < ring_buffer->size; i++) {
+    isize size = ring_buffer_size(ring_buffer);
+    for (isize i = 0; i < size; i++) {
         if ((*ring_buffer)[i] == value) {
             return true;
         }
@@ -1849,7 +1855,7 @@ inline void hash_set_remove(HashSet<T>* hash_set, T value) {
 /// Files
 /// ----------------
 
-const isize MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024l; // 1 GB
+const isize MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024l;
 
 enum class FileReadError {
     FileNotFound,
