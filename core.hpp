@@ -300,7 +300,10 @@ static void* vm_alloc_ring_buffer(isize size) {
     core_assert(size % (isize)os_page_size() == 0);
 
     const int fd = fileno(tmpfile());
-    ftruncate(fd, size);
+    core_assert_msg(fd != -1, "tmpfile failed");
+
+    int res = ftruncate(fd, size);
+    core_assert_msg(res == 0, "ftruncate failed");
 
     void* buffer =
         mmap(NULL, size * 2, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -1059,7 +1062,7 @@ inline isize string_utf8_size(String str) {
 }
 
 namespace std {
-template <> struct std::hash<String> {
+template <> struct hash<String> {
     std::size_t operator()(String str) const {
         std::size_t hash = 0;
         for (isize i = 0; i < str.size; i++) {

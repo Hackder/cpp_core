@@ -32,10 +32,12 @@ if(PROFILE)
   set(CMAKE_CXX_FLAGS_RELEASEFAST "${CMAKE_CXX_FLAGS_RELEASEFAST} -g -finline-functions")
 endif()
 
-if(MSVC)
-  add_compile_options(-Wall)
-else()
+if(CLANG)
   add_compile_options(-Wall -Wextra -Wpedantic -Wuninitialized -Wno-gnu-zero-variadic-macro-arguments)
+elseif(GNU)
+  add_compile_options(-Wall -Wextra -Wpedantic -Wuninitialized)
+else()
+  add_compile_options(-Wall)
 endif()
 
 set(SOURCE_FILES
