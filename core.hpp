@@ -121,6 +121,52 @@ template <typename T, typename E> struct Result {
 #define result_err(result) {result, false}
 
 /// ------------------
+/// OS specifics
+/// ------------------
+
+#if defined(_WIN32) || defined(_WIN64)
+#error "Windows is not supported"
+#else
+#include <sys/mman.h>
+#include <unistd.h>
+
+static isize os_page_size() {
+    return getpagesize();
+}
+
+static void* vm_alloc_ring_buffer(isize size) {
+    core_assert(size > 0);
+    core_assert(size % (isize)getpagesize() == 0);
+
+    const int fd = fileno(tmpfile());
+    ftruncate(fd, size);
+
+    void* buffer =
+        mmap(NULL, size * 2, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    core_assert_msg(buffer != MAP_FAILED, "mmap failed");
+
+    void* result = mmap(buffer, size, PROT_READ | PROT_WRITE,
+                        MAP_SHARED | MAP_FIXED, fd, 0);
+    core_assert_msg(result != MAP_FAILED, "mmap failed");
+
+    result = mmap((u8*)buffer + size, size, PROT_READ | PROT_WRITE,
+                  MAP_SHARED | MAP_FIXED, fd, 0);
+    core_assert_msg(result != MAP_FAILED, "mmap failed");
+
+    close(fd);
+
+    return buffer;
+}
+
+static void vm_free_ring_buffer(void* buffer, isize size) {
+    core_assert(size > 0);
+    core_assert(size % (isize)getpagesize() == 0);
+
+    munmap(buffer, size * 2);
+}
+#endif
+
+/// ------------------
 /// Memory allocation
 /// ------------------
 
@@ -323,6 +369,15 @@ template <typename T> inline bool slice_equals(Slice<T> a, Slice<T> b) {
     }
 
     return memcmp(a.data, b.data, a.size) == 0;
+}
+
+template <typename T> inline bool slice_all_equals(Slice<T> slice, T value) {
+    for (isize i = 0; i < slice.size; i++) {
+        if (slice[i] != value) {
+            return false;
+        }
+    }
+    return true;
 }
 
 template <typename T> inline isize slice_index_of(Slice<T> slice, T value) {
@@ -1924,4 +1979,175 @@ file_read_full(const String path, Allocator alloc,
     }
 
     return result_ok(data);
+}
+
+/// ----------------
+/// Virtual Memory Ring Buffer
+/// ----------------
+
+template <typename T> struct VMRingBuffer {
+    T* data;
+    isize capacity;
+    isize start_pos;
+    isize end_pos;
+
+    T& operator[](isize index) {
+        core_assert(index >= 0);
+        core_assert(index < ring_buffer_size(this));
+
+        isize real_index = mod_by_power_of_two((start_pos + index), capacity);
+        return this->data[real_index];
+    }
+
+    const T& operator[](isize index) const {
+        core_assert(index >= 0);
+        core_assert(index < ring_buffer_size(this));
+
+        isize real_index = mod_by_power_of_two((start_pos + index), capacity);
+        return this->data[real_index];
+    }
+};
+
+template <typename T>
+inline void vm_ring_buffer_init(VMRingBuffer<T>* ring_buffer, isize capacity) {
+    core_assert(capacity > 0);
+    isize byte_size = sizeof(T) * capacity;
+    core_assert(byte_size % getpagesize() == 0);
+
+    ring_buffer->data = (T*)vm_alloc_ring_buffer(byte_size);
+    ring_buffer->capacity = capacity;
+    ring_buffer->start_pos = 0;
+    ring_buffer->end_pos = 0;
+}
+
+template <typename T>
+inline VMRingBuffer<T> vm_ring_buffer_make(isize capacity = os_page_size()) {
+    VMRingBuffer<T> ring_buffer = {};
+    vm_ring_buffer_init(&ring_buffer, capacity);
+    return ring_buffer;
+}
+
+template <typename T>
+inline void vm_ring_buffer_free(VMRingBuffer<T>* ring_buffer) {
+    isize byte_size = sizeof(T) * ring_buffer->capacity;
+    vm_free_ring_buffer(ring_buffer->data, byte_size);
+    ring_buffer->data = nullptr;
+    ring_buffer->capacity = 0;
+    ring_buffer->start_pos = 0;
+    ring_buffer->end_pos = 0;
+}
+
+template <typename T>
+inline isize vm_ring_buffer_size(VMRingBuffer<T>* ring_buffer) {
+    core_assert(ring_buffer->end_pos >= ring_buffer->start_pos);
+    return ring_buffer->end_pos - ring_buffer->start_pos;
+}
+
+template <typename T>
+inline void vm_ring_buffer_push_end(VMRingBuffer<T>* ring_buffer, T value) {
+    core_assert(ring_buffer->end_pos >= ring_buffer->start_pos);
+    core_assert(ring_buffer->capacity > 0);
+    core_assert(ring_buffer->data);
+    isize size = vm_ring_buffer_size(ring_buffer);
+    if (size == ring_buffer->capacity) {
+        core_assert_msg(false, "VMRingBuffer is full");
+    }
+    isize end_index =
+        mod_by_power_of_two(ring_buffer->end_pos, ring_buffer->capacity);
+    ring_buffer->data[end_index] = value;
+    ring_buffer->end_pos += 1;
+}
+
+template <typename T>
+inline void vm_ring_buffer_push_front(VMRingBuffer<T>* ring_buffer, T value) {
+    core_assert(ring_buffer->end_pos >= ring_buffer->start_pos);
+    core_assert(ring_buffer->capacity > 0);
+    core_assert(ring_buffer->data);
+    isize size = vm_ring_buffer_size(ring_buffer);
+    if (size == ring_buffer->capacity) {
+        core_assert_msg(false, "VMRingBuffer is full");
+    }
+
+    ring_buffer->start_pos -= 1;
+    isize new_index =
+        mod_by_power_of_two(ring_buffer->start_pos, ring_buffer->capacity);
+    ring_buffer->data[new_index] = value;
+}
+
+template <typename T>
+inline T vm_ring_buffer_pop_end(VMRingBuffer<T>* ring_buffer) {
+    core_assert(ring_buffer->end_pos > ring_buffer->start_pos);
+    core_assert(ring_buffer->capacity > 0);
+    core_assert(ring_buffer->data);
+    isize size = vm_ring_buffer_size(ring_buffer);
+    core_assert(size > 0);
+
+    ring_buffer->end_pos -= 1;
+    isize end_index =
+        mod_by_power_of_two(ring_buffer->end_pos, ring_buffer->capacity);
+    return ring_buffer->data[end_index];
+}
+
+template <typename T>
+inline T vm_ring_buffer_pop_front(VMRingBuffer<T>* ring_buffer) {
+    core_assert(ring_buffer->end_pos > ring_buffer->start_pos);
+    core_assert(ring_buffer->capacity > 0);
+    core_assert(ring_buffer->data);
+    isize size = vm_ring_buffer_size(ring_buffer);
+    core_assert(size > 0);
+
+    isize front_index =
+        mod_by_power_of_two(ring_buffer->start_pos, ring_buffer->capacity);
+    T value = ring_buffer->data[front_index];
+    ring_buffer->start_pos += 1;
+    return value;
+}
+
+template <typename T>
+inline Slice<T> vm_ring_buffer_writable_slice(VMRingBuffer<T>* ring_buffer) {
+    core_assert(ring_buffer->end_pos >= ring_buffer->start_pos);
+    core_assert(ring_buffer->capacity > 0);
+    core_assert(ring_buffer->data);
+    isize size = vm_ring_buffer_size(ring_buffer);
+    core_assert(size < ring_buffer->capacity);
+
+    isize slice_size = ring_buffer->capacity - size;
+    isize end_index =
+        mod_by_power_of_two(ring_buffer->end_pos, ring_buffer->capacity);
+
+    return Slice<T>{&ring_buffer->data[end_index], slice_size};
+}
+
+template <typename T>
+inline void vm_ring_buffer_advance_end(VMRingBuffer<T>* ring_buffer,
+                                       isize count) {
+    core_assert(ring_buffer->end_pos >= ring_buffer->start_pos);
+    core_assert(ring_buffer->capacity > 0);
+    core_assert(ring_buffer->data);
+    isize size = vm_ring_buffer_size(ring_buffer);
+    core_assert(size + count <= ring_buffer->capacity);
+    ring_buffer->end_pos += count;
+}
+
+template <typename T>
+inline Slice<T> vm_ring_buffer_readable_slice(VMRingBuffer<T>* ring_buffer) {
+    core_assert(ring_buffer->end_pos >= ring_buffer->start_pos);
+    core_assert(ring_buffer->capacity > 0);
+    core_assert(ring_buffer->data);
+
+    isize size = vm_ring_buffer_size(ring_buffer);
+    isize start_index =
+        mod_by_power_of_two(ring_buffer->start_pos, ring_buffer->capacity);
+
+    return Slice<T>{&ring_buffer->data[start_index], size};
+}
+
+template <typename T>
+inline void vm_ring_buffer_consume(VMRingBuffer<T>* ring_buffer, isize count) {
+    core_assert(ring_buffer->end_pos >= ring_buffer->start_pos);
+    core_assert(ring_buffer->capacity > 0);
+    core_assert(ring_buffer->data);
+    isize size = vm_ring_buffer_size(ring_buffer);
+    core_assert(count <= size);
+    ring_buffer->start_pos += count;
 }

@@ -485,3 +485,82 @@ TEST(Core, ReadFileFull) {
     EXPECT_EQ(file_data.value.size, 14);
     EXPECT_EQ(data, "Hello, World!\n");
 }
+
+TEST(Core, VMRingBuffer) {
+    isize page_size = os_page_size();
+    VMRingBuffer<u8> ring = vm_ring_buffer_make<u8>(page_size);
+    defer(vm_ring_buffer_free(&ring));
+
+    EXPECT_EQ(ring.capacity, page_size);
+
+    // Test basic push and pop
+    for (isize i = 0; i < page_size; i++) {
+        vm_ring_buffer_push_end(&ring, (u8)(i % 256));
+    }
+
+    EXPECT_EQ(vm_ring_buffer_size(&ring), page_size);
+
+    for (isize i = 0; i < page_size; i++) {
+        u8 value = ring.data[i];
+        EXPECT_EQ(value, (u8)(i % 256));
+    }
+
+    for (isize i = 0; i < page_size; i++) {
+        u8 value = vm_ring_buffer_pop_front(&ring);
+        EXPECT_EQ(value, (u8)(i % 256));
+    }
+
+    EXPECT_EQ(vm_ring_buffer_size(&ring), 0);
+
+    // push and pop front
+    for (isize i = 0; i < page_size; i++) {
+        vm_ring_buffer_push_front(&ring, (u8)(i % 256));
+    }
+
+    EXPECT_EQ(vm_ring_buffer_size(&ring), page_size);
+
+    for (isize i = 0; i < page_size; i++) {
+        u8 value = ring.data[(ring.start_pos + i) % ring.capacity];
+        EXPECT_EQ(value, (u8)((page_size - 1 - i) % 256));
+    }
+
+    for (isize i = 0; i < page_size; i++) {
+        u8 value = vm_ring_buffer_pop_end(&ring);
+        EXPECT_EQ(value, (u8)(i % 256));
+    }
+
+    EXPECT_EQ(vm_ring_buffer_size(&ring), 0);
+
+    // Test writable slice and advance
+    Slice<u8> writable = vm_ring_buffer_writable_slice(&ring);
+    EXPECT_EQ(writable.size, page_size);
+
+    slice_fill(writable, (u8)0xAA);
+    EXPECT_EQ(vm_ring_buffer_size(&ring), 0);
+
+    vm_ring_buffer_advance_end(&ring, page_size);
+    EXPECT_EQ(vm_ring_buffer_size(&ring), page_size);
+
+    // consume half the buffer
+    Slice<u8> readable = vm_ring_buffer_readable_slice(&ring);
+    EXPECT_EQ(readable.size, page_size);
+
+    vm_ring_buffer_consume(&ring, readable.size / 2);
+    EXPECT_EQ(vm_ring_buffer_size(&ring), page_size / 2);
+
+    writable = vm_ring_buffer_writable_slice(&ring);
+    EXPECT_EQ(writable.size, page_size / 2);
+
+    slice_fill(writable, (u8)0xBB);
+    vm_ring_buffer_advance_end(&ring, writable.size);
+    EXPECT_EQ(vm_ring_buffer_size(&ring), page_size);
+
+    readable = vm_ring_buffer_readable_slice(&ring);
+
+    Slice<u8> first_half = slice_subslice(readable, 0, page_size / 2);
+    EXPECT_EQ(slice_all_equals(first_half, (u8)0xAA), true);
+
+    Slice<u8> second_half =
+        slice_subslice(readable, page_size / 2, page_size / 2);
+    EXPECT_EQ(slice_all_equals(second_half, (u8)0xBB), true);
+}
