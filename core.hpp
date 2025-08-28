@@ -59,7 +59,11 @@ using isize = ptrdiff_t;
 /// ------------------
 
 #ifndef LIBFUZZER
+#if defined(_MSC_VER)
+#define core_debug_trap() __debugbreak()
+#else
 #define core_debug_trap() __builtin_trap()
+#endif
 #else
 #define core_debug_trap() std::abort()
 #endif
@@ -125,7 +129,189 @@ template <typename T, typename E> struct Result {
 /// ------------------
 
 #if defined(_WIN32) || defined(_WIN64)
-#error "Windows is not supported"
+#pragma comment(lib, "mincore")
+#define NOMINMAX
+#define _WIN32_WINNT 0x0A00
+#define NTDDI_VERSION NTDDI_WIN10_RS4
+#include <sdkddkver.h>
+#include <windows.h>
+#include <intrin.h>
+
+inline isize os_page_size() {
+    static isize page_size = 0;
+
+    if (page_size != 0) {
+        return page_size;
+    }
+
+    SYSTEM_INFO si;
+
+    if (GetProcAddress(GetModuleHandleA("kernel32.dll"), "GetNativeSystemInfo")) {
+        GetNativeSystemInfo(&si);
+    } else {
+        GetSystemInfo(&si);
+    }
+
+    page_size = (isize)si.dwAllocationGranularity;
+    return page_size;
+}
+
+#define popcount64(value) __popcnt64(value)
+
+static void* vm_alloc_ring_buffer(isize size) {
+    core_assert(size > 0);
+    core_assert(size % (isize)os_page_size() == 0);
+
+    BOOL result;
+    HANDLE section = nullptr;
+    void* buffer = nullptr;
+    void* placeholder1 = nullptr;
+    void* placeholder2 = nullptr;
+    void* view1 = nullptr;
+    void* view2 = nullptr;
+
+    isize page_size = os_page_size();
+
+    //
+    // Reserve a placeholder region where the buffer will be mapped.
+    //
+
+    placeholder1 = (PCHAR) VirtualAlloc2 (
+        nullptr,
+        nullptr,
+        2 * size,
+        MEM_RESERVE | MEM_RESERVE_PLACEHOLDER,
+        PAGE_NOACCESS,
+        nullptr, 0
+    );
+
+    if (placeholder1 == nullptr) {
+        printf ("VirtualAlloc2 failed, error %#lx\n", GetLastError());
+        goto Exit;
+    }
+
+    //
+    // Split the placeholder region into two regions of equal size.
+    //
+
+    result = VirtualFree (
+        placeholder1,
+        size,
+        MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER
+    );
+
+    if (result == FALSE) {
+        printf ("VirtualFreeEx failed, error %#lx\n", GetLastError());
+        goto Exit;
+    }
+
+    placeholder2 = (void*) ((ULONG_PTR) placeholder1 + size);
+
+    //
+    // Create a pagefile-backed section for the buffer.
+    //
+
+    section = CreateFileMapping (
+        INVALID_HANDLE_VALUE,
+        nullptr,
+        PAGE_READWRITE,
+        0,
+        (DWORD)size, nullptr
+    );
+
+    if (section == nullptr) {
+        printf ("CreateFileMapping failed, error %#lx\n", GetLastError());
+        goto Exit;
+    }
+
+    //
+    // Map the section into the first placeholder region.
+    //
+
+    view1 = MapViewOfFile3 (
+        section,
+        nullptr,
+        placeholder1,
+        0,
+        size,
+        MEM_REPLACE_PLACEHOLDER,
+        PAGE_READWRITE,
+        nullptr, 0
+    );
+
+    if (view1 == nullptr) {
+        printf ("MapViewOfFile3 failed, error %#lx\n", GetLastError());
+        goto Exit;
+    }
+
+    //
+    // Ownership transferred, don't free this now.
+    //
+
+    placeholder1 = nullptr;
+
+    //
+    // Map the section into the second placeholder region.
+    //
+
+    view2 = MapViewOfFile3 (
+        section,
+        nullptr,
+        placeholder2,
+        0,
+        size,
+        MEM_REPLACE_PLACEHOLDER,
+        PAGE_READWRITE,
+        nullptr, 0
+    );
+
+    if (view2 == nullptr) {
+        printf ("MapViewOfFile3 failed, error %#lx\n", GetLastError());
+        goto Exit;
+    }
+
+    //
+    // Success, return both mapped views to the caller.
+    //
+
+    buffer = view1;
+
+    placeholder2 = nullptr;
+    view1 = nullptr;
+    view2 = nullptr;
+
+Exit:
+
+    if (section != nullptr) {
+        CloseHandle (section);
+    }
+
+    if (placeholder1 != nullptr) {
+        VirtualFree (placeholder1, 0, MEM_RELEASE);
+    }
+
+    if (placeholder2 != nullptr) {
+        VirtualFree (placeholder2, 0, MEM_RELEASE);
+    }
+
+    if (view1 != nullptr) {
+        UnmapViewOfFileEx (view1, 0);
+    }
+
+    if (view2 != nullptr) {
+        UnmapViewOfFileEx (view2, 0);
+    }
+
+    core_assert(buffer != nullptr);
+
+    return buffer;
+}
+
+static void vm_free_ring_buffer(void* buffer, isize size) {
+    UnmapViewOfFile(buffer);
+    UnmapViewOfFile((u8*)buffer + size);
+}
+
 #else
 #include <sys/mman.h>
 #include <unistd.h>
@@ -134,9 +320,11 @@ static isize os_page_size() {
     return getpagesize();
 }
 
+#define popcount64(value) __builtin_popcountll(value)
+
 static void* vm_alloc_ring_buffer(isize size) {
     core_assert(size > 0);
-    core_assert(size % (isize)getpagesize() == 0);
+    core_assert(size % (isize)os_page_size() == 0);
 
     const int fd = fileno(tmpfile());
     ftruncate(fd, size);
@@ -188,7 +376,11 @@ struct Allocator {
 };
 
 template <typename T>
-__attribute__((malloc)) __attribute__((returns_nonnull)) inline T*
+#if defined(_MSC_VER)
+#else
+__attribute__((malloc)) __attribute__((returns_nonnull))
+#endif
+inline T*
 core_alloc(Allocator allocator, isize count = 1, isize alignment = alignof(T)) {
     core_assert_msg((alignment & (alignment - 1)) == 0,
                     "Alignment must be a power of 2");
@@ -414,7 +606,11 @@ inline Arena arena_make(Slice<u8> data) {
     return arena;
 }
 
-__attribute__((malloc)) __attribute__((returns_nonnull)) inline u8*
+#if defined(_MSC_VER)
+#else
+__attribute__((malloc)) __attribute__((returns_nonnull))
+#endif
+inline u8*
 arena_alloc(Arena* arena, isize size, isize alignment = DEFAULT_ALIGNMENT) {
     core_assert(arena != nullptr);
     core_assert(arena->data.data != nullptr);
@@ -1712,7 +1908,7 @@ inline isize bit_set_count(const BitSet* a) {
 
     while (bytes - i >= 8) {
         u64 value = ((u64*)(a->data))[i];
-        count += __builtin_popcountll(value);
+        count += popcount64(value);
         i += 8;
     }
 
@@ -1721,7 +1917,7 @@ inline isize bit_set_count(const BitSet* a) {
         u8* value_ptr = (u8*)&value;
         core_assert(bytes - i < 8);
         memcpy(value_ptr, a->data + i, bytes - i);
-        count += __builtin_popcountll(value);
+        count += popcount64(value);
     }
 
     return count;
@@ -1910,7 +2106,8 @@ inline void hash_set_remove(HashSet<T>* hash_set, T value) {
 /// Files
 /// ----------------
 
-const isize MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024l;
+const isize MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024ll;
+const isize PATH_MAX = 4 * 1024;
 
 enum class FileReadError {
     FileNotFound,
@@ -1928,9 +2125,10 @@ file_read_full(const String path, Allocator alloc,
     char path_buffer[PATH_MAX];
     string_to_cstr(path, path_buffer, sizeof(path_buffer));
 
-    FILE* file = fopen(path_buffer, "rb");
-    if (!file) {
-        switch (errno) {
+    FILE* file;
+    errno_t err = fopen_s(&file, path_buffer, "rb");
+    if (err) {
+        switch (err) {
         case ENOENT:
             return result_err(FileReadError::FileNotFound);
         case EACCES:
@@ -2012,7 +2210,7 @@ template <typename T>
 inline void vm_ring_buffer_init(VMRingBuffer<T>* ring_buffer, isize capacity) {
     core_assert(capacity > 0);
     isize byte_size = sizeof(T) * capacity;
-    core_assert(byte_size % getpagesize() == 0);
+    core_assert(byte_size % os_page_size() == 0);
 
     ring_buffer->data = (T*)vm_alloc_ring_buffer(byte_size);
     ring_buffer->capacity = capacity;
