@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <stdio.h>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -133,9 +134,9 @@ template <typename T, typename E> struct Result {
 #define NOMINMAX
 #define _WIN32_WINNT 0x0A00
 #define NTDDI_VERSION NTDDI_WIN10_RS4
+#include <intrin.h>
 #include <sdkddkver.h>
 #include <windows.h>
-#include <intrin.h>
 
 inline isize os_page_size() {
     static isize page_size = 0;
@@ -146,7 +147,8 @@ inline isize os_page_size() {
 
     SYSTEM_INFO si;
 
-    if (GetProcAddress(GetModuleHandleA("kernel32.dll"), "GetNativeSystemInfo")) {
+    if (GetProcAddress(GetModuleHandleA("kernel32.dll"),
+                       "GetNativeSystemInfo")) {
         GetNativeSystemInfo(&si);
     } else {
         GetSystemInfo(&si);
@@ -176,17 +178,12 @@ static void* vm_alloc_ring_buffer(isize size) {
     // Reserve a placeholder region where the buffer will be mapped.
     //
 
-    placeholder1 = (PCHAR) VirtualAlloc2 (
-        nullptr,
-        nullptr,
-        2 * size,
-        MEM_RESERVE | MEM_RESERVE_PLACEHOLDER,
-        PAGE_NOACCESS,
-        nullptr, 0
-    );
+    placeholder1 = (PCHAR)VirtualAlloc2(nullptr, nullptr, 2 * size,
+                                        MEM_RESERVE | MEM_RESERVE_PLACEHOLDER,
+                                        PAGE_NOACCESS, nullptr, 0);
 
     if (placeholder1 == nullptr) {
-        printf ("VirtualAlloc2 failed, error %#lx\n", GetLastError());
+        printf("VirtualAlloc2 failed, error %#lx\n", GetLastError());
         goto Exit;
     }
 
@@ -194,33 +191,25 @@ static void* vm_alloc_ring_buffer(isize size) {
     // Split the placeholder region into two regions of equal size.
     //
 
-    result = VirtualFree (
-        placeholder1,
-        size,
-        MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER
-    );
+    result =
+        VirtualFree(placeholder1, size, MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER);
 
     if (result == FALSE) {
-        printf ("VirtualFreeEx failed, error %#lx\n", GetLastError());
+        printf("VirtualFreeEx failed, error %#lx\n", GetLastError());
         goto Exit;
     }
 
-    placeholder2 = (void*) ((ULONG_PTR) placeholder1 + size);
+    placeholder2 = (void*)((ULONG_PTR)placeholder1 + size);
 
     //
     // Create a pagefile-backed section for the buffer.
     //
 
-    section = CreateFileMapping (
-        INVALID_HANDLE_VALUE,
-        nullptr,
-        PAGE_READWRITE,
-        0,
-        (DWORD)size, nullptr
-    );
+    section = CreateFileMapping(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE,
+                                0, (DWORD)size, nullptr);
 
     if (section == nullptr) {
-        printf ("CreateFileMapping failed, error %#lx\n", GetLastError());
+        printf("CreateFileMapping failed, error %#lx\n", GetLastError());
         goto Exit;
     }
 
@@ -228,19 +217,11 @@ static void* vm_alloc_ring_buffer(isize size) {
     // Map the section into the first placeholder region.
     //
 
-    view1 = MapViewOfFile3 (
-        section,
-        nullptr,
-        placeholder1,
-        0,
-        size,
-        MEM_REPLACE_PLACEHOLDER,
-        PAGE_READWRITE,
-        nullptr, 0
-    );
+    view1 = MapViewOfFile3(section, nullptr, placeholder1, 0, size,
+                           MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, nullptr, 0);
 
     if (view1 == nullptr) {
-        printf ("MapViewOfFile3 failed, error %#lx\n", GetLastError());
+        printf("MapViewOfFile3 failed, error %#lx\n", GetLastError());
         goto Exit;
     }
 
@@ -254,19 +235,11 @@ static void* vm_alloc_ring_buffer(isize size) {
     // Map the section into the second placeholder region.
     //
 
-    view2 = MapViewOfFile3 (
-        section,
-        nullptr,
-        placeholder2,
-        0,
-        size,
-        MEM_REPLACE_PLACEHOLDER,
-        PAGE_READWRITE,
-        nullptr, 0
-    );
+    view2 = MapViewOfFile3(section, nullptr, placeholder2, 0, size,
+                           MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, nullptr, 0);
 
     if (view2 == nullptr) {
-        printf ("MapViewOfFile3 failed, error %#lx\n", GetLastError());
+        printf("MapViewOfFile3 failed, error %#lx\n", GetLastError());
         goto Exit;
     }
 
@@ -283,23 +256,23 @@ static void* vm_alloc_ring_buffer(isize size) {
 Exit:
 
     if (section != nullptr) {
-        CloseHandle (section);
+        CloseHandle(section);
     }
 
     if (placeholder1 != nullptr) {
-        VirtualFree (placeholder1, 0, MEM_RELEASE);
+        VirtualFree(placeholder1, 0, MEM_RELEASE);
     }
 
     if (placeholder2 != nullptr) {
-        VirtualFree (placeholder2, 0, MEM_RELEASE);
+        VirtualFree(placeholder2, 0, MEM_RELEASE);
     }
 
     if (view1 != nullptr) {
-        UnmapViewOfFileEx (view1, 0);
+        UnmapViewOfFileEx(view1, 0);
     }
 
     if (view2 != nullptr) {
-        UnmapViewOfFileEx (view2, 0);
+        UnmapViewOfFileEx(view2, 0);
     }
 
     core_assert(buffer != nullptr);
@@ -380,8 +353,8 @@ template <typename T>
 #else
 __attribute__((malloc)) __attribute__((returns_nonnull))
 #endif
-inline T*
-core_alloc(Allocator allocator, isize count = 1, isize alignment = alignof(T)) {
+inline T* core_alloc(Allocator allocator, isize count = 1,
+                     isize alignment = alignof(T)) {
     core_assert_msg((alignment & (alignment - 1)) == 0,
                     "Alignment must be a power of 2");
     return (T*)allocator.alloc(allocator.data, AllocationMode::Alloc,
@@ -610,8 +583,8 @@ inline Arena arena_make(Slice<u8> data) {
 #else
 __attribute__((malloc)) __attribute__((returns_nonnull))
 #endif
-inline u8*
-arena_alloc(Arena* arena, isize size, isize alignment = DEFAULT_ALIGNMENT) {
+inline u8* arena_alloc(Arena* arena, isize size,
+                       isize alignment = DEFAULT_ALIGNMENT) {
     core_assert(arena != nullptr);
     core_assert(arena->data.data != nullptr);
     core_assert(arena->offset >= 0);
@@ -2107,7 +2080,10 @@ inline void hash_set_remove(HashSet<T>* hash_set, T value) {
 /// ----------------
 
 const isize MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024ll;
-const isize PATH_MAX = 4 * 1024;
+
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
 
 enum class FileReadError {
     FileNotFound,
@@ -2125,10 +2101,9 @@ file_read_full(const String path, Allocator alloc,
     char path_buffer[PATH_MAX];
     string_to_cstr(path, path_buffer, sizeof(path_buffer));
 
-    FILE* file;
-    errno_t err = fopen_s(&file, path_buffer, "rb");
-    if (err) {
-        switch (err) {
+    FILE* file = fopen(path_buffer, "rb");
+    if (!file) {
+        switch (errno) {
         case ENOENT:
             return result_err(FileReadError::FileNotFound);
         case EACCES:
