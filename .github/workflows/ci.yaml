@@ -21,11 +21,16 @@ jobs:
         uses: lukka/get-cmake@v3.28.3
 
       - name: Configure
-        run: cmake -S . -B build
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=ReleaseSafe
 
       - name: Build
         run: cmake --build build -j 2
 
       - name: Test
-        run: ctest --test-dir build
+        if: matrix.os != 'windows-latest'
+        run: ./build/core_test
+
+      - name: Test on Windows
+        if: matrix.os == 'windows-latest'
+        run: .\build\Debug\core_test.exe
 
