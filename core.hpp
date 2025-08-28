@@ -160,6 +160,8 @@ inline isize os_page_size() {
 
 #define popcount64(value) __popcnt64(value)
 
+// source:
+// https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualalloc2
 static void* vm_alloc_ring_buffer(isize size) {
     core_assert(size > 0);
     core_assert(size % (isize)os_page_size() == 0);
