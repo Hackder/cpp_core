@@ -477,7 +477,7 @@ TEST(Core, ReadFileFull) {
     Allocator alloc = arena_allocator(&arena);
 
     Result<Slice<u8>, FileReadError> file_data =
-        file_read_full(string_from_cstr("../testfile.txt"), alloc);
+        file_read_full(string_from_cstr("../testfile"), alloc);
 
     EXPECT_TRUE(file_data.is_ok);
     core_assert(file_data.is_ok);
