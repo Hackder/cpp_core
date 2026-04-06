@@ -564,3 +564,476 @@ TEST(Core, VMRingBuffer) {
         slice_subslice(readable, page_size / 2, page_size / 2);
     EXPECT_EQ(slice_all_equals(second_half, (u8)0xBB), true);
 }
+
+TEST(Core, MatrixMultiplySquare) {
+    using Mat3x3 = Matrix<f32, 3, 3>;
+
+    Mat3x3 mat1 = {{
+        {1.0f, 2.0f, 3.0f},
+        {4.0f, 5.0f, 6.0f},
+        {7.0f, 8.0f, 9.0f},
+    }};
+    Mat3x3 mat2 = {{
+        {9.0f, 8.0f, 7.0f},
+        {6.0f, 5.0f, 4.0f},
+        {3.0f, 2.0f, 1.0f},
+    }};
+
+    Mat3x3 result = mat1 * mat2;
+
+    Mat3x3 expected = {{
+        {30.0f, 24.0f, 18.0f},
+        {84.0f, 69.0f, 54.0f},
+        {138.0f, 114.0f, 90.0f},
+    }};
+
+    EXPECT_EQ(result, expected);
+}
+
+TEST(Core, MatrixMultiplyRect) {
+    using Mat3x3 = Matrix<f32, 3, 3>;
+    using Mat3x2 = Matrix<f32, 3, 2>;
+    using Mat2x3 = Matrix<f32, 2, 3>;
+    using Mat2x2 = Matrix<f32, 2, 2>;
+
+    Mat2x3 mat1 = {{
+        {9.0f, 8.0f, 7.0f},
+        {6.0f, 5.0f, 4.0f},
+    }};
+    Mat3x2 mat2 = {{
+        {1.0f, 2.0f},
+        {4.0f, 5.0f},
+        {7.0f, 8.0f},
+    }};
+
+    Mat2x2 result = mat1 * mat2;
+
+    Mat2x2 expected = {{
+        {90.0f, 114.0f},
+        {54.0f, 69.0f},
+    }};
+
+    EXPECT_EQ(result, expected);
+
+    Mat3x3 result2 = mat2 * mat1;
+
+    Mat3x3 expected2 = {{
+        {21.0f, 18.0f, 15.0f},
+        {66.0f, 57.0f, 48.0f},
+        {111.0f, 96.0f, 81.0f},
+    }};
+
+    EXPECT_EQ(result2, expected2);
+}
+
+TEST(Core, MatrixMultiplyInPlace) {
+    using Mat3x2 = Matrix<f32, 3, 2>;
+    using Mat2x2 = Matrix<f32, 2, 2>;
+
+    Mat3x2 mat1 = {{
+        {1.0f, 2.0f},
+        {4.0f, 5.0f},
+        {7.0f, 8.0f},
+    }};
+    Mat2x2 mat2 = {{
+        {9.0f, 8.0f},
+        {6.0f, 5.0f},
+    }};
+
+    Mat3x2 result = mat1;
+    result *= mat2;
+
+    Mat3x2 expected = {{
+        {21.0f, 18.0f},
+        {66.0f, 57.0f},
+        {111.0f, 96.0f},
+    }};
+
+    EXPECT_EQ(result, expected);
+}
+
+TEST(Core, MatrixMultiplicationScalar) {
+    using Mat3x2 = Matrix<f32, 3, 2>;
+
+    Mat3x2 mat1 = {{
+        {1.0f, 2.0f},
+        {4.0f, 5.0f},
+        {7.0f, 8.0f},
+    }};
+
+    Mat3x2 result = mat1 * 2.0f;
+
+    Mat3x2 expected = {{
+        {2.0f, 4.0f},
+        {8.0f, 10.0f},
+        {14.0f, 16.0f},
+    }};
+
+    EXPECT_EQ(result, expected);
+}
+
+TEST(Core, MatrixMultiplicationScalarInPlace) {
+    using Mat3x2 = Matrix<f32, 3, 2>;
+
+    Mat3x2 mat1 = {{
+        {1.0f, 2.0f},
+        {4.0f, 5.0f},
+        {7.0f, 8.0f},
+    }};
+
+    mat1 *= 2.0f;
+
+    Mat3x2 expected = {{
+        {2.0f, 4.0f},
+        {8.0f, 10.0f},
+        {14.0f, 16.0f},
+    }};
+
+    EXPECT_EQ(mat1, expected);
+}
+
+TEST(Core, MatrixStaticArrayMultiplication) {
+    using Mat2x3 = Matrix<f32, 2, 3>;
+    using Mat2x1 = Matrix<f32, 2, 1>;
+    using Vec3 = StaticArray<f32, 3>;
+
+    Mat2x3 mat1 = {{
+        {1.0f, 2.0f, 3.0f},
+        {4.0f, 5.0f, 6.0f},
+    }};
+    Vec3 vec = {7.0f, 8.0f, 9.0f};
+
+    Mat2x1 result = mat1 * vec;
+
+    Mat2x1 expected = {{
+        {50.0f},
+        {122.0f},
+    }};
+
+    EXPECT_EQ(result, expected);
+}
+
+TEST(Core, MatrixStaticArrayMultiplicationInPlace) {
+    using Mat1x1 = Matrix<f32, 1, 1>;
+    using Vec3 = StaticArray<f32, 1>;
+
+    Mat1x1 mat1 = {{
+        {2.0f},
+    }};
+    Vec3 vec = {7.0f};
+
+    Mat1x1 result = mat1;
+    result *= vec;
+
+    Mat1x1 expected = {{
+        {14.0f},
+    }};
+
+    EXPECT_EQ(result, expected);
+}
+
+TEST(Core, MatrixAddition) {
+    using Mat3x2 = Matrix<f32, 3, 2>;
+
+    Mat3x2 mat1 = {{
+        {1.0f, 2.0f},
+        {4.0f, 5.0f},
+        {7.0f, 8.0f},
+    }};
+    Mat3x2 mat2 = {{
+        {9.0f, 8.0f},
+        {6.0f, 5.0f},
+        {3.0f, 2.0f},
+    }};
+
+    Mat3x2 result = mat1 + mat2;
+
+    Mat3x2 expected = {{
+        {10.0f, 10.0f},
+        {10.0f, 10.0f},
+        {10.0f, 10.0f},
+    }};
+
+    EXPECT_EQ(result, expected);
+}
+
+TEST(Core, MatrixAdditionInPlace) {
+    using Mat3x2 = Matrix<f32, 3, 2>;
+
+    Mat3x2 mat1 = {{
+        {1.0f, 2.0f},
+        {4.0f, 5.0f},
+        {7.0f, 8.0f},
+    }};
+    Mat3x2 mat2 = {{
+        {9.0f, 8.0f},
+        {6.0f, 5.0f},
+        {3.0f, 2.0f},
+    }};
+
+    mat1 += mat2;
+
+    Mat3x2 expected = {{
+        {10.0f, 10.0f},
+        {10.0f, 10.0f},
+        {10.0f, 10.0f},
+    }};
+
+    EXPECT_EQ(mat1, expected);
+}
+
+TEST(Core, MatrixAdditionScalar) {
+    using Mat3x2 = Matrix<f32, 3, 2>;
+
+    Mat3x2 mat1 = {{
+        {1.0f, 2.0f},
+        {4.0f, 5.0f},
+        {7.0f, 8.0f},
+    }};
+
+    Mat3x2 result = mat1 + 2.0f;
+
+    Mat3x2 expected = {{
+        {3.0f, 4.0f},
+        {6.0f, 7.0f},
+        {9.0f, 10.0f},
+    }};
+
+    EXPECT_EQ(result, expected);
+}
+
+TEST(Core, MatrixAdditionScalarInPlace) {
+    using Mat3x2 = Matrix<f32, 3, 2>;
+
+    Mat3x2 mat1 = {{
+        {1.0f, 2.0f},
+        {4.0f, 5.0f},
+        {7.0f, 8.0f},
+    }};
+
+    mat1 += 2.0f;
+
+    Mat3x2 expected = {{
+        {3.0f, 4.0f},
+        {6.0f, 7.0f},
+        {9.0f, 10.0f},
+    }};
+
+    EXPECT_EQ(mat1, expected);
+}
+
+TEST(Core, MatrixAdditionStaticArray) {
+    using Mat3x2 = Matrix<f32, 3, 1>;
+
+    Mat3x2 mat1 = {{
+        {1.0f},
+        {2.0f},
+        {3.0f},
+    }};
+
+    StaticArray<f32, 3> vec = {9.0f, 8.0f, 7.0f};
+    Mat3x2 result = mat1 + vec;
+
+    Mat3x2 expected = {{
+        {10.0f},
+        {10.0f},
+        {10.0f},
+    }};
+
+    EXPECT_EQ(result, expected);
+}
+
+TEST(Core, MatrixAdditionStaticArrayInPlace) {
+    using Mat3x2 = Matrix<f32, 3, 1>;
+
+    Mat3x2 mat1 = {{
+        {1.0f},
+        {2.0f},
+        {3.0f},
+    }};
+
+    StaticArray<f32, 3> vec = {9.0f, 8.0f, 7.0f};
+    mat1 += vec;
+
+    Mat3x2 expected = {{
+        {10.0f},
+        {10.0f},
+        {10.0f},
+    }};
+
+    EXPECT_EQ(mat1, expected);
+}
+
+TEST(Core, MatrixSubtraction) {
+    using Mat3x2 = Matrix<f32, 3, 2>;
+
+    Mat3x2 mat1 = {{
+        {1.0f, 2.0f},
+        {4.0f, 5.0f},
+        {7.0f, 8.0f},
+    }};
+    Mat3x2 mat2 = {{
+        {9.0f, 8.0f},
+        {6.0f, 5.0f},
+        {3.0f, 2.0f},
+    }};
+
+    Mat3x2 result = mat1 - mat2;
+
+    Mat3x2 expected = {{
+        {-8.0f, -6.0f},
+        {-2.0f, 0.0f},
+        {4.0f, 6.0f},
+    }};
+
+    EXPECT_EQ(result, expected);
+}
+
+TEST(Core, MatrixSubtractionInPlace) {
+    using Mat3x2 = Matrix<f32, 3, 2>;
+
+    Mat3x2 mat1 = {{
+        {1.0f, 2.0f},
+        {4.0f, 5.0f},
+        {7.0f, 8.0f},
+    }};
+    Mat3x2 mat2 = {{
+        {9.0f, 8.0f},
+        {6.0f, 5.0f},
+        {3.0f, 2.0f},
+    }};
+
+    mat1 -= mat2;
+
+    Mat3x2 expected = {{
+        {-8.0f, -6.0f},
+        {-2.0f, 0.0f},
+        {4.0f, 6.0f},
+    }};
+
+    EXPECT_EQ(mat1, expected);
+}
+
+TEST(Core, MatrixSubtractionScalar) {
+    using Mat3x2 = Matrix<f32, 3, 2>;
+
+    Mat3x2 mat1 = {{
+        {1.0f, 2.0f},
+        {4.0f, 5.0f},
+        {7.0f, 8.0f},
+    }};
+
+    Mat3x2 result = mat1 - 2.0f;
+
+    Mat3x2 expected = {{
+        {-1.0f, 0.0f},
+        {2.0f, 3.0f},
+        {5.0f, 6.0f},
+    }};
+
+    EXPECT_EQ(result, expected);
+}
+
+TEST(Core, MatrixSubtractionScalarInPlace) {
+    using Mat3x2 = Matrix<f32, 3, 2>;
+
+    Mat3x2 mat1 = {{
+        {1.0f, 2.0f},
+        {4.0f, 5.0f},
+        {7.0f, 8.0f},
+    }};
+
+    mat1 -= 2.0f;
+
+    Mat3x2 expected = {{
+        {-1.0f, 0.0f},
+        {2.0f, 3.0f},
+        {5.0f, 6.0f},
+    }};
+
+    EXPECT_EQ(mat1, expected);
+}
+
+TEST(Core, MatrixSubtractionStaticArray) {
+    using Mat3x2 = Matrix<f32, 3, 1>;
+
+    Mat3x2 mat1 = {{
+        {1.0f},
+        {2.0f},
+        {3.0f},
+    }};
+
+    StaticArray<f32, 3> vec = {9.0f, 8.0f, 7.0f};
+    Mat3x2 result = mat1 - vec;
+
+    Mat3x2 expected = {{
+        {-8.0f},
+        {-6.0f},
+        {-4.0f},
+    }};
+
+    EXPECT_EQ(result, expected);
+}
+
+TEST(Core, MatrixSubtractionStaticArrayInPlace) {
+    using Mat3x2 = Matrix<f32, 3, 1>;
+
+    Mat3x2 mat1 = {{
+        {1.0f},
+        {2.0f},
+        {3.0f},
+    }};
+
+    StaticArray<f32, 3> vec = {9.0f, 8.0f, 7.0f};
+    mat1 -= vec;
+
+    Mat3x2 expected = {{
+        {-8.0f},
+        {-6.0f},
+        {-4.0f},
+    }};
+
+    EXPECT_EQ(mat1, expected);
+}
+
+TEST(Core, MatrixTranspose) {
+    using Mat2x3 = Matrix<f32, 2, 3>;
+    using Mat3x2 = Matrix<f32, 3, 2>;
+
+    Mat2x3 mat1 = {{
+        {9.0f, 8.0f, 7.0f},
+        {6.0f, 5.0f, 4.0f},
+    }};
+
+    Mat3x2 result = mat_transpose(mat1);
+
+    Mat3x2 expected = {{
+        {9.0f, 6.0f},
+        {8.0f, 5.0f},
+        {7.0f, 4.0f},
+    }};
+
+    EXPECT_EQ(result, expected);
+}
+
+TEST(Core, MatrixHadamardProduct) {
+    using Mat2x3 = Matrix<f32, 2, 3>;
+
+    Mat2x3 mat1 = {{
+        {1.0f, 2.0f, 3.0f},
+        {4.0f, 5.0f, 6.0f},
+    }};
+    Mat2x3 mat2 = {{
+        {9.0f, 8.0f, 7.0f},
+        {6.0f, 5.0f, 4.0f},
+    }};
+
+    Mat2x3 result = hadamard_product(mat1, mat2);
+
+    Mat2x3 expected = {{
+        {9.0f, 16.0f, 21.0f},
+        {24.0f, 25.0f, 24.0f},
+    }};
+
+    EXPECT_EQ(result, expected);
+}

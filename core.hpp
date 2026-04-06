@@ -2329,3 +2329,244 @@ inline void vm_ring_buffer_consume(VMRingBuffer<T>* ring_buffer, isize count) {
     core_assert(count <= size);
     ring_buffer->start_pos += count;
 }
+
+/// ------------------
+/// Matrices
+/// ------------------
+
+template <typename T, u8 ROWS, u8 COLS> struct Matrix {
+    T data[ROWS][COLS];
+
+    static const u8 rows = ROWS;
+    static const u8 cols = COLS;
+
+    static constexpr Matrix<T, ROWS, COLS> identity() {
+        Matrix<T, ROWS, COLS> result = {};
+        u8 row = 0;
+        u8 col = 0;
+
+        for (; row < ROWS && col < COLS; row++, col++) {
+            result.data[row][col] = static_cast<T>(1);
+        }
+
+        return result;
+    }
+
+    static constexpr Matrix<T, ROWS, 1>
+    column_vector(const StaticArray<T, ROWS>& data) {
+        Matrix<T, ROWS, 1> result = {};
+        for (u8 row = 0; row < ROWS; row++) {
+            result.data[row][0] = data[row];
+        }
+        return result;
+    }
+
+    static constexpr Matrix<T, 1, COLS>
+    row_vector(const StaticArray<T, COLS>& data) {
+        Matrix<T, 1, COLS> result = {};
+        for (u8 col = 0; col < COLS; col++) {
+            result.data[0][col] = data[col];
+        }
+        return result;
+    }
+
+    constexpr bool operator==(const Matrix<T, ROWS, COLS>& other) const {
+        for (u8 row = 0; row < ROWS; row++) {
+            for (u8 col = 0; col < COLS; col++) {
+                if (this->data[row][col] != other.data[row][col]) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    // Multiplication
+
+    template <u8 COLS_OTHER>
+    Matrix<T, ROWS, COLS_OTHER> constexpr
+    operator*(const Matrix<T, COLS, COLS_OTHER>& other) const {
+        Matrix<T, ROWS, COLS_OTHER> result = {};
+        for (u8 row = 0; row < ROWS; row++) {
+            for (u8 col = 0; col < COLS_OTHER; col++) {
+                T sum = static_cast<T>(0);
+                for (u8 i = 0; i < COLS; i++) {
+                    sum += this->data[row][i] * other.data[i][col];
+                }
+                result.data[row][col] = sum;
+            }
+        }
+        return result;
+    }
+
+    Matrix<T, ROWS, COLS> constexpr
+    operator*=(const Matrix<T, COLS, COLS>& other) {
+        Matrix<T, ROWS, COLS> result = *this * other;
+        *this = result;
+        return *this;
+    }
+
+    constexpr Matrix<T, ROWS, COLS> operator*(const T scalar) const {
+        Matrix<T, ROWS, COLS> result = {};
+        for (u8 row = 0; row < ROWS; row++) {
+            for (u8 col = 0; col < COLS; col++) {
+                result.data[row][col] = this->data[row][col] * scalar;
+            }
+        }
+        return result;
+    }
+
+    constexpr Matrix<T, ROWS, COLS>& operator*=(const T scalar) {
+        for (u8 row = 0; row < ROWS; row++) {
+            for (u8 col = 0; col < COLS; col++) {
+                this->data[row][col] *= scalar;
+            }
+        }
+        return *this;
+    }
+
+    constexpr Matrix<T, ROWS, 1>
+    operator*(const StaticArray<T, COLS>& other) const {
+        Matrix<T, COLS, 1> tmp = Matrix<T, COLS, 1>::column_vector(other);
+        return *this * tmp;
+    }
+
+    constexpr Matrix<T, ROWS, 1> operator*=(const StaticArray<T, COLS>& other) {
+        Matrix<T, ROWS, 1> result = *this * other;
+        *this = result;
+        return *this;
+    }
+
+    // Addition
+
+    constexpr Matrix<T, ROWS, COLS>
+    operator+(const Matrix<T, ROWS, COLS>& other) const {
+        Matrix<T, ROWS, COLS> result = {};
+        for (u8 row = 0; row < ROWS; row++) {
+            for (u8 col = 0; col < COLS; col++) {
+                result.data[row][col] =
+                    this->data[row][col] + other.data[row][col];
+            }
+        }
+        return result;
+    }
+
+    constexpr Matrix<T, ROWS, COLS>&
+    operator+=(const Matrix<T, ROWS, COLS>& other) {
+        for (u8 row = 0; row < ROWS; row++) {
+            for (u8 col = 0; col < COLS; col++) {
+                this->data[row][col] += other.data[row][col];
+            }
+        }
+        return *this;
+    }
+
+    constexpr Matrix<T, ROWS, COLS> operator+(const T scalar) const {
+        Matrix<T, ROWS, COLS> result = {};
+        for (u8 row = 0; row < ROWS; row++) {
+            for (u8 col = 0; col < COLS; col++) {
+                result.data[row][col] = this->data[row][col] + scalar;
+            }
+        }
+        return result;
+    }
+
+    constexpr Matrix<T, ROWS, COLS>& operator+=(const T scalar) {
+        for (u8 row = 0; row < ROWS; row++) {
+            for (u8 col = 0; col < COLS; col++) {
+                this->data[row][col] += scalar;
+            }
+        }
+        return *this;
+    }
+
+    constexpr Matrix<T, ROWS, COLS>
+    operator+(const StaticArray<T, ROWS>& other) const {
+        return *this + Matrix<T, ROWS, COLS>::column_vector(other);
+    }
+
+    constexpr Matrix<T, ROWS, COLS>&
+    operator+=(const StaticArray<T, ROWS>& other) {
+        *this += Matrix<T, ROWS, COLS>::column_vector(other);
+        return *this;
+    }
+
+    // Subtraction
+
+    constexpr Matrix<T, ROWS, COLS>
+    operator-(const Matrix<T, ROWS, COLS>& other) const {
+        Matrix<T, ROWS, COLS> result = {};
+        for (u8 row = 0; row < ROWS; row++) {
+            for (u8 col = 0; col < COLS; col++) {
+                result.data[row][col] =
+                    this->data[row][col] - other.data[row][col];
+            }
+        }
+        return result;
+    }
+
+    Matrix<T, ROWS, COLS>& operator-=(const Matrix<T, ROWS, COLS>& other) {
+        for (u8 row = 0; row < ROWS; row++) {
+            for (u8 col = 0; col < COLS; col++) {
+                this->data[row][col] -= other.data[row][col];
+            }
+        }
+        return *this;
+    }
+
+    constexpr Matrix<T, ROWS, COLS> operator-(const T scalar) const {
+        Matrix<T, ROWS, COLS> result = {};
+        for (u8 row = 0; row < ROWS; row++) {
+            for (u8 col = 0; col < COLS; col++) {
+                result.data[row][col] = this->data[row][col] - scalar;
+            }
+        }
+        return result;
+    }
+
+    constexpr Matrix<T, ROWS, COLS>& operator-=(const T scalar) {
+        for (u8 row = 0; row < ROWS; row++) {
+            for (u8 col = 0; col < COLS; col++) {
+                this->data[row][col] -= scalar;
+            }
+        }
+        return *this;
+    }
+
+    constexpr Matrix<T, ROWS, COLS>
+    operator-(const StaticArray<T, ROWS>& other) const {
+        return *this - Matrix<T, ROWS, COLS>::column_vector(other);
+    }
+
+    constexpr Matrix<T, ROWS, COLS>&
+    operator-=(const StaticArray<T, ROWS>& other) {
+        *this -= Matrix<T, ROWS, COLS>::column_vector(other);
+        return *this;
+    }
+};
+
+template <typename T, u8 ROWS, u8 COLS>
+inline Matrix<T, COLS, ROWS>
+mat_transpose(const Matrix<T, ROWS, COLS>& matrix) {
+    Matrix<T, COLS, ROWS> result = {};
+    for (u8 row = 0; row < ROWS; row++) {
+        for (u8 col = 0; col < COLS; col++) {
+            result.data[col][row] = matrix.data[row][col];
+        }
+    }
+    return result;
+}
+
+template <typename T, u8 ROWS, u8 COLS>
+inline Matrix<T, ROWS, COLS>
+hadamard_product(const Matrix<T, ROWS, COLS>& matrix1,
+                 const Matrix<T, ROWS, COLS>& matrix2) {
+    Matrix<T, ROWS, COLS> result = {};
+    for (u8 row = 0; row < ROWS; row++) {
+        for (u8 col = 0; col < COLS; col++) {
+            result.data[row][col] =
+                matrix1.data[row][col] * matrix2.data[row][col];
+        }
+    }
+    return result;
+}
